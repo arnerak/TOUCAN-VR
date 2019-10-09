@@ -24,23 +24,27 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.MotionEvent;
 
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.ExoPlayer;
+import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.LoadControl;
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
 import com.google.android.exoplayer2.source.ConcatenatingMediaSource;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.dash.DefaultDashSRDChunkSource;
+import com.google.android.exoplayer2.source.dash.manifest.DashManifest;
 import com.google.android.exoplayer2.source.hls.HlsMediaSource;
 import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource;
 import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.trackselection.TrackSelector;
 import com.google.android.exoplayer2.upstream.DataSource;
+import com.google.android.exoplayer2.upstream.DataSpec;
 import com.google.android.exoplayer2.upstream.DefaultAllocator;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
@@ -52,11 +56,17 @@ import com.google.android.exoplayer2.util.Util;
 import org.gearvrf.GVRActivity;
 import org.gearvrf.scene_objects.GVRVideoSceneObjectPlayer;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import fr.unice.i3s.uca4svr.toucan_vr.connectivity.CheckConnection;
 import fr.unice.i3s.uca4svr.toucan_vr.connectivity.CheckConnectionResponse;
+import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.MPDEventListener;
+import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.AdaptationSetSRD;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.track_selection.CustomTrackSelector;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.track_selection.PyramidalTrackSelection;
 import fr.unice.i3s.uca4svr.toucan_vr.dynamicEditing.DynamicEditingHolder;
@@ -72,12 +82,12 @@ import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.DashSRDMediaSource;
 import fr.unice.i3s.uca4svr.toucan_vr.tracking.ReplacementTracker;
 import fr.unice.i3s.uca4svr.toucan_vr.tracking.TileQualityTracker;
 
-public class PlayerActivity extends GVRActivity implements RequestPermissionResultListener, CheckConnectionResponse {
+public class PlayerActivity extends GVRActivity implements RequestPermissionResultListener, CheckConnectionResponse, MPDEventListener {
 
     enum Status {
         NO_INTENT, NO_INTERNET, NO_PERMISSION, CHECKING_INTERNET, CHECKING_PERMISSION,
         CHECKING_INTERNET_AND_PERMISSION, READY_TO_PLAY, PLAYING, PAUSED, PLAYBACK_ENDED,
-        PLAYBACK_ERROR, WRONGDYNED, NULL
+        PLAYBACK_ERROR, WRONGDYNED, NULL, INVALID_SRD
     }
 
     private static TransferListenerBroadcaster MASTER_TRANSFER_LISTENER =
@@ -88,6 +98,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
     private GVRVideoSceneObjectPlayer<ExoPlayer> videoSceneObjectPlayer;
     private ExoPlayer player;
     private boolean needPreparePlayer = true;
+    private MediaSource mediaSource;
     private DefaultBandwidthMeter bandwidthMeter;
 
     // Player's parameters to fine tune as we need
@@ -131,6 +142,8 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
 
     private Intent intent;
     private boolean newIntent = false;
+
+    private boolean manifestLoaded = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -231,7 +244,8 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         gridWidth = intent.getIntExtra("W", 3);
         gridHeight = intent.getIntExtra("H", 3);
         tiles = intent.getStringExtra("tilesCSV").split(",");
-        numberOfTiles = tiles.length / 4;
+        // TODO: retrieve number of tiles from mpd and build TiledExoPLayer using mpd #tiles
+        numberOfTiles = 16;
         //Dynamic editing check
         dynamicEditingFN = intent.getStringExtra("dynamicEditingFN");
         if(dynamicEditingFN != null && dynamicEditingFN.length() > 0)
@@ -348,9 +362,6 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
                     // In case of NO_INTERNET the video object player is null
                     case READY_TO_PLAY:
                         startPlaying(true);
-                        synchronized (this) {
-                            changeStatus(Status.PLAYING);
-                        }
                         break;
                     case PLAYING:
                         startPlaying(false);
@@ -401,7 +412,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
      * ExoplayerSceneObject.
      * @return the created video scene object
      */
-    private GVRVideoSceneObjectPlayer<ExoPlayer> makeVideoSceneObject() {
+    public GVRVideoSceneObjectPlayer<ExoPlayer> makeVideoSceneObject() {
         boolean needNewPlayer = player == null;
         if (needNewPlayer) {
             // The video track selection factory and the track selector.
@@ -425,6 +436,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
 
             // Instantiation of the ExoPlayer using our custom implementation.
             // The number of tiles and the other components created above are given as parameters.
+            Log.v("M360", "creating tiledexoplayer with " + numberOfTiles + " tiles");
             player = new TiledExoPlayer(this, numberOfTiles, trackSelector, loadControl);
         }
 
@@ -443,7 +455,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         for (int i = 0; i < uris.length; i++) {
             mediaSources[i] = buildMediaSource(uris[i], extensions[i]);
         }
-        MediaSource mediaSource = mediaSources.length == 1 ? mediaSources[0]
+        mediaSource = mediaSources.length == 1 ? mediaSources[0]
                 : new ConcatenatingMediaSource(mediaSources);
 
         needPreparePlayer = false;
@@ -594,8 +606,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
                         /* eventListener */ null);
             case C.TYPE_DASH:
                 DashSRDMediaSource mediaSource = new DashSRDMediaSource(uri, buildDataSourceFactory(false),
-                        new DefaultDashSRDChunkSource.Factory(mediaDataSourceFactory), mainHandler,
-                        /* eventListener */ null);
+                        new DefaultDashSRDChunkSource.Factory(mediaDataSourceFactory), mainHandler, this);
                 mediaSource.setDynamicEditingHolder(dynamicEditingHolder);
                 mediaSource.setTileQualityTracker(loggingQualityFoV ? new TileQualityTracker(logPrefix) : null);
                 mediaSource.setReplacementTracker(loggingReplacement ? new ReplacementTracker(logPrefix) : null);
@@ -656,5 +667,72 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         } catch (Exception e) {
             changeStatus(Status.WRONGDYNED);
         }
+    }
+
+    @Override
+    public void onManifestLoaded(DashManifest manifest) {
+        try {
+            List<AdaptationSetSRD> adaptationSets = (List<AdaptationSetSRD>)(List<?>)manifest.getPeriod(0).adaptationSets;
+            String[] srdVals = adaptationSets.get(0).supplementalProperties.get(0).value.split(",");
+            gridWidth = Integer.parseInt(srdVals[srdVals.length - 2]);
+            gridHeight = Integer.parseInt(srdVals[srdVals.length - 1]);
+
+            ArrayList<String> srdTiles = new ArrayList<>();
+            for (AdaptationSetSRD adaptationSet : adaptationSets) {
+                if (adaptationSet.supplementalProperties.size() == 0)
+                    continue;
+                // extract x,y,w,h
+                srdVals = Arrays.copyOfRange(adaptationSet.supplementalProperties.get(0).value.split(","), 1, 5);
+                for (String s : srdVals)
+                    srdTiles.add(s);
+            }
+            tiles = srdTiles.toArray(new String[0]);
+            numberOfTiles = tiles.length / 4;
+
+        } catch (Exception ex) {
+            synchronized (this) {
+                changeStatus(Status.INVALID_SRD);
+            }
+            return;
+        }
+
+        Log.v("M360", "TEST");
+        ((Minimal360Video)getMain()).setSRDValues(gridWidth, gridHeight, tiles);
+        videoSceneObjectPlayer = makeVideoSceneObject();
+        ((Minimal360Video) getMain()).setVideoSceneObjectPlayer(videoSceneObjectPlayer);
+
+        synchronized (this) {
+            changeStatus(Status.PLAYING);
+        }
+    }
+
+    @Override
+    public void onLoadStarted(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs) {
+
+    }
+
+    @Override
+    public void onLoadCompleted(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded) {
+
+    }
+
+    @Override
+    public void onLoadCanceled(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded) {
+
+    }
+
+    @Override
+    public void onLoadError(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded, IOException error, boolean wasCanceled) {
+
+    }
+
+    @Override
+    public void onUpstreamDiscarded(int trackType, long mediaStartTimeMs, long mediaEndTimeMs) {
+
+    }
+
+    @Override
+    public void onDownstreamFormatChanged(int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaTimeMs) {
+
     }
 }

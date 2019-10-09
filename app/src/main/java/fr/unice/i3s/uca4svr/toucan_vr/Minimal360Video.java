@@ -48,7 +48,6 @@ import org.gearvrf.scene_objects.GVRVideoSceneObject.GVRVideoType;
 import org.gearvrf.scene_objects.GVRVideoSceneObjectPlayer;
 
 import java.util.ArrayList;
-import java.util.Locale;
 import java.util.concurrent.Future;
 
 import fr.unice.i3s.uca4svr.toucan_vr.dynamicEditing.DynamicEditingHolder;
@@ -318,6 +317,11 @@ public class Minimal360Video extends GVRMain implements PushResponse {
                             gvrContext.getActivity().getString(R.string.initializing));
                     createScene(textObject);
                     break;
+                  case INVALID_SRD:
+                    textObject = new GVRTextViewSceneObject(gvrContext, 1.2f, 2f,
+                            "Manifest file contains invalid SRD information!");
+                    createScene(textObject);
+                    break;
                 }
               }
             });
@@ -493,5 +497,11 @@ public class Minimal360Video extends GVRMain implements PushResponse {
   @Override
   public void pushResponse(boolean exists) {
 
+  }
+
+  public void setSRDValues(int w, int h, String[] tiles) {
+    this.gridHeight = h;
+    this.gridWidth = w;
+    this.tiles = tiles;
   }
 }
