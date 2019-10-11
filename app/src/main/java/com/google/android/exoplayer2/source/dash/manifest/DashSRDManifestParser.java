@@ -56,6 +56,7 @@ import org.xmlpull.v1.XmlPullParserException;
 import org.xmlpull.v1.XmlPullParserFactory;
 
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.AdaptationSetSRD;
+import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.DashManifestExtended;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.SupplementalProperty;
 
 /**
@@ -185,9 +186,9 @@ public class DashSRDManifestParser extends DefaultHandler
                                                              long durationMs, long minBufferTimeMs, boolean dynamic, long minUpdateTimeMs,
                                                              long timeShiftBufferDepthMs, long suggestedPresentationDelayMs, UtcTimingElement utcTiming,
                                                              Uri location, List<Period> periods) {
-        return new DashManifest(availabilityStartTime, durationMs, minBufferTimeMs,
+        return new DashManifestExtended(availabilityStartTime, durationMs, minBufferTimeMs,
                 dynamic, minUpdateTimeMs, timeShiftBufferDepthMs, suggestedPresentationDelayMs, utcTiming,
-                location, periods);
+                location, periods, null);
     }
 
     protected UtcTimingElement parseUtcTiming(XmlPullParser xpp) {

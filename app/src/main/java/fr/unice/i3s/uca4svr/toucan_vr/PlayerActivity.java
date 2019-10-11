@@ -20,6 +20,7 @@ import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
@@ -30,21 +31,19 @@ import android.view.MotionEvent;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.LoadControl;
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
 import com.google.android.exoplayer2.source.ConcatenatingMediaSource;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.dash.DefaultDashSRDChunkSource;
-import com.google.android.exoplayer2.source.dash.manifest.DashManifest;
+import com.google.android.exoplayer2.source.dash.manifest.DashSRDManifestParser;
 import com.google.android.exoplayer2.source.hls.HlsMediaSource;
 import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource;
 import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.trackselection.TrackSelector;
 import com.google.android.exoplayer2.upstream.DataSource;
-import com.google.android.exoplayer2.upstream.DataSpec;
 import com.google.android.exoplayer2.upstream.DefaultAllocator;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
@@ -56,7 +55,9 @@ import com.google.android.exoplayer2.util.Util;
 import org.gearvrf.GVRActivity;
 import org.gearvrf.scene_objects.GVRVideoSceneObjectPlayer;
 
-import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -65,8 +66,9 @@ import java.util.Set;
 
 import fr.unice.i3s.uca4svr.toucan_vr.connectivity.CheckConnection;
 import fr.unice.i3s.uca4svr.toucan_vr.connectivity.CheckConnectionResponse;
-import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.MPDEventListener;
+import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.DashSRDMediaSource;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.AdaptationSetSRD;
+import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.DashManifestExtended;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.track_selection.CustomTrackSelector;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.track_selection.PyramidalTrackSelection;
 import fr.unice.i3s.uca4svr.toucan_vr.dynamicEditing.DynamicEditingHolder;
@@ -78,11 +80,10 @@ import fr.unice.i3s.uca4svr.toucan_vr.permissions.PermissionManager;
 import fr.unice.i3s.uca4svr.toucan_vr.permissions.RequestPermissionResultListener;
 import fr.unice.i3s.uca4svr.toucan_vr.tilespicker.TilesPicker;
 import fr.unice.i3s.uca4svr.toucan_vr.tracking.BandwidthConsumedTracker;
-import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.DashSRDMediaSource;
 import fr.unice.i3s.uca4svr.toucan_vr.tracking.ReplacementTracker;
 import fr.unice.i3s.uca4svr.toucan_vr.tracking.TileQualityTracker;
 
-public class PlayerActivity extends GVRActivity implements RequestPermissionResultListener, CheckConnectionResponse, MPDEventListener {
+public class PlayerActivity extends GVRActivity implements RequestPermissionResultListener, CheckConnectionResponse {
 
     enum Status {
         NO_INTENT, NO_INTERNET, NO_PERMISSION, CHECKING_INTERNET, CHECKING_PERMISSION,
@@ -143,8 +144,6 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
     private Intent intent;
     private boolean newIntent = false;
 
-    private boolean manifestLoaded = false;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -169,12 +168,8 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         final Minimal360Video main = new Minimal360Video(statusCode, tiles, gridWidth, gridHeight, dynamicEditingHolder);
         setMain(main, "gvr.xml");
 
-        // The intent is required to run the app, if it has not been provided we can stop there.
-        if (statusCode != Status.NO_INTENT) {
-            bandwidthMeter = new DefaultBandwidthMeter();
-            MASTER_TRANSFER_LISTENER.addListener(bandwidthMeter);
-            checkInternetAndPermissions();
-        }
+        // Download manifest to get SRD for parametrization
+        new DownloadManifestFromUri().execute(mediaUri);
     }
 
     // Rebuild everything if the intent has changed after launching a new video from the parametrizer.
@@ -195,17 +190,58 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
             final Minimal360Video main = new Minimal360Video(statusCode, tiles, gridWidth, gridHeight, dynamicEditingHolder);
             setMain(main, "gvr.xml");
 
-            if (statusCode != Status.NO_INTENT) {
-                // Clean the listeners list, we got to start fresh.
-                MASTER_TRANSFER_LISTENER.removeAllListeners();
+            // Download manifest to get SRD for parametrization
+            new DownloadManifestFromUri().execute(mediaUri);
+        }
+    }
 
-                // Lets reset the bandwidth meter too to avoid using legacy bandwidth estimates
-                bandwidthMeter = new DefaultBandwidthMeter();
-                MASTER_TRANSFER_LISTENER.addListener(bandwidthMeter);
+    protected void onManifestLoaded(DashManifestExtended manifest) {
+        // Use SRD to set gridWidth, gridHeight and the tiles configuration
+        try {
+            List<AdaptationSetSRD> adaptationSets = (List<AdaptationSetSRD>)(List<?>)manifest.getPeriod(0).adaptationSets;
+            String[] srdVals = adaptationSets.get(0).supplementalProperties.get(0).value.split(",");
+            gridWidth = Integer.parseInt(srdVals[srdVals.length - 2]);
+            gridHeight = Integer.parseInt(srdVals[srdVals.length - 1]);
 
-                // Check the availability of connection and permissions
-                checkInternetAndPermissions();
+            ArrayList<List<String>> srdDups = new ArrayList<>();
+            ArrayList<String> srdTiles = new ArrayList<>();
+            for (AdaptationSetSRD adaptationSet : adaptationSets) {
+                if (adaptationSet.supplementalProperties.size() == 0)
+                    continue;
+                // extract x,y,w,h
+                srdVals = Arrays.copyOfRange(adaptationSet.supplementalProperties.get(0).value.split(","), 1, 5);
+
+                if (!srdDups.contains(Arrays.asList(srdVals))){
+                    srdDups.add(Arrays.asList(srdVals));
+                    for (String s : srdVals)
+                        srdTiles.add(s);
+                }
             }
+            tiles = srdTiles.toArray(new String[0]);
+            numberOfTiles = tiles.length / 4;
+
+            Log.v("M360", Arrays.toString(tiles));
+            Log.v("M360", "" + numberOfTiles);
+
+        } catch (Exception ex) {
+            Log.e("M360", ex.getMessage());
+        }
+
+        // Apply parameters attained from SRD
+        final Minimal360Video main = (Minimal360Video) getMain();
+        main.setSRDValues(gridWidth, gridHeight, tiles);
+
+        // The intent is required to run the app, if it has not been provided we can stop there.
+        if (statusCode != Status.NO_INTENT) {
+            // Clean the listeners list, we got to start fresh.
+            MASTER_TRANSFER_LISTENER.removeAllListeners();
+
+            // Lets reset the bandwidth meter too to avoid using legacy bandwidth estimates
+            bandwidthMeter = new DefaultBandwidthMeter();
+            MASTER_TRANSFER_LISTENER.addListener(bandwidthMeter);
+
+            // Check the availability of connection and permissions
+            checkInternetAndPermissions();
         }
     }
 
@@ -244,8 +280,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         gridWidth = intent.getIntExtra("W", 3);
         gridHeight = intent.getIntExtra("H", 3);
         tiles = intent.getStringExtra("tilesCSV").split(",");
-        // TODO: retrieve number of tiles from mpd and build TiledExoPLayer using mpd #tiles
-        numberOfTiles = 16;
+        numberOfTiles = tiles.length / 4;
         //Dynamic editing check
         dynamicEditingFN = intent.getStringExtra("dynamicEditingFN");
         if(dynamicEditingFN != null && dynamicEditingFN.length() > 0)
@@ -361,18 +396,16 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
                         break;
                     // In case of NO_INTERNET the video object player is null
                     case READY_TO_PLAY:
+                    case PAUSED:
                         startPlaying(true);
+                        synchronized (this) {
+                            changeStatus(Status.PLAYING);
+                        }
                         break;
                     case PLAYING:
                         startPlaying(false);
                         synchronized (this) {
                             changeStatus(Status.PAUSED);
-                        }
-                        break;
-                    case PAUSED:
-                        startPlaying(true);
-                        synchronized (this) {
-                            changeStatus(Status.PLAYING);
                         }
                         break;
                 }
@@ -436,7 +469,6 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
 
             // Instantiation of the ExoPlayer using our custom implementation.
             // The number of tiles and the other components created above are given as parameters.
-            Log.v("M360", "creating tiledexoplayer with " + numberOfTiles + " tiles");
             player = new TiledExoPlayer(this, numberOfTiles, trackSelector, loadControl);
         }
 
@@ -606,7 +638,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
                         /* eventListener */ null);
             case C.TYPE_DASH:
                 DashSRDMediaSource mediaSource = new DashSRDMediaSource(uri, buildDataSourceFactory(false),
-                        new DefaultDashSRDChunkSource.Factory(mediaDataSourceFactory), mainHandler, this);
+                        new DefaultDashSRDChunkSource.Factory(mediaDataSourceFactory), mainHandler, null);
                 mediaSource.setDynamicEditingHolder(dynamicEditingHolder);
                 mediaSource.setTileQualityTracker(loggingQualityFoV ? new TileQualityTracker(logPrefix) : null);
                 mediaSource.setReplacementTracker(loggingReplacement ? new ReplacementTracker(logPrefix) : null);
@@ -669,70 +701,39 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         }
     }
 
-    @Override
-    public void onManifestLoaded(DashManifest manifest) {
-        try {
-            List<AdaptationSetSRD> adaptationSets = (List<AdaptationSetSRD>)(List<?>)manifest.getPeriod(0).adaptationSets;
-            String[] srdVals = adaptationSets.get(0).supplementalProperties.get(0).value.split(",");
-            gridWidth = Integer.parseInt(srdVals[srdVals.length - 2]);
-            gridHeight = Integer.parseInt(srdVals[srdVals.length - 1]);
+    class DownloadManifestFromUri extends AsyncTask<String, String, String> {
+        private DashManifestExtended manifest;
+        /**
+         * Download file in background thread
+         */
+        @Override
+        protected String doInBackground(String... f_url) {
+            try {
+                Log.v("M360", "downloading manifest " + f_url[0]);
+                URL url = new URL(f_url[0]);
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setReadTimeout(10000 /* milliseconds */);
+                connection.setConnectTimeout(15000 /* milliseconds */);
+                connection.setRequestMethod("GET");
+                connection.setDoInput(true);
+                connection.connect();
+                InputStream stream = connection.getInputStream();
 
-            ArrayList<String> srdTiles = new ArrayList<>();
-            for (AdaptationSetSRD adaptationSet : adaptationSets) {
-                if (adaptationSet.supplementalProperties.size() == 0)
-                    continue;
-                // extract x,y,w,h
-                srdVals = Arrays.copyOfRange(adaptationSet.supplementalProperties.get(0).value.split(","), 1, 5);
-                for (String s : srdVals)
-                    srdTiles.add(s);
-            }
-            tiles = srdTiles.toArray(new String[0]);
-            numberOfTiles = tiles.length / 4;
+                manifest = (DashManifestExtended)new DashSRDManifestParser().parse(
+                        Uri.parse(""), stream);
 
-        } catch (Exception ex) {
-            synchronized (this) {
-                changeStatus(Status.INVALID_SRD);
+                stream.close();
+            } catch (Exception e) {
+                Log.e("M360", e.getMessage());
             }
-            return;
+
+            return null;
         }
 
-        Log.v("M360", "TEST");
-        ((Minimal360Video)getMain()).setSRDValues(gridWidth, gridHeight, tiles);
-        videoSceneObjectPlayer = makeVideoSceneObject();
-        ((Minimal360Video) getMain()).setVideoSceneObjectPlayer(videoSceneObjectPlayer);
-
-        synchronized (this) {
-            changeStatus(Status.PLAYING);
+        @Override
+        protected void onPostExecute(String file_url) {
+            // Resume player once manifest is downloaded
+            onManifestLoaded(manifest);
         }
-    }
-
-    @Override
-    public void onLoadStarted(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs) {
-
-    }
-
-    @Override
-    public void onLoadCompleted(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded) {
-
-    }
-
-    @Override
-    public void onLoadCanceled(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded) {
-
-    }
-
-    @Override
-    public void onLoadError(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded, IOException error, boolean wasCanceled) {
-
-    }
-
-    @Override
-    public void onUpstreamDiscarded(int trackType, long mediaStartTimeMs, long mediaEndTimeMs) {
-
-    }
-
-    @Override
-    public void onDownstreamFormatChanged(int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaTimeMs) {
-
     }
 }
