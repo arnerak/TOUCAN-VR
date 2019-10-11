@@ -35,18 +35,14 @@ public class DynamicEditingHolder {
 		this.isDynamicEdited = isDynamicEdited;
 		this.timeThreshold = 100;
 		this.angleThreshold = 30;
-		if(this.isDynamicEdited) {
-			this.snapchanges = new ArrayList<>();
-		}
+		this.snapchanges = new ArrayList<>();
 	}
 
 	public DynamicEditingHolder(boolean isDynamicEdited, double angleThreshold, long timeThreshold) {
 		this.isDynamicEdited = isDynamicEdited;
 		this.timeThreshold = timeThreshold;
 		this.angleThreshold = angleThreshold;
-		if(this.isDynamicEdited) {
-			this.snapchanges = new ArrayList<>();
-		}
+		this.snapchanges = new ArrayList<>();
 	}
 
 

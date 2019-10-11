@@ -504,4 +504,8 @@ public class Minimal360Video extends GVRMain implements PushResponse {
     this.gridWidth = w;
     this.tiles = tiles;
   }
+
+  public void setDynamicEditingHolder(DynamicEditingHolder dynamicEditingHolder) {
+    this.dynamicEditingHolder = dynamicEditingHolder;
+  }
 }

@@ -227,9 +227,13 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
             Log.e("M360", ex.getMessage());
         }
 
-        // Apply parameters attained from SRD
+        // Apply parameters attained from manifest
         final Minimal360Video main = (Minimal360Video) getMain();
         main.setSRDValues(gridWidth, gridHeight, tiles);
+        main.setDynamicEditingHolder(manifest.getDynamicEditingHolder());
+
+        // Get snapchange info from manifest
+        dynamicEditingHolder = manifest.getDynamicEditingHolder();
 
         // The intent is required to run the app, if it has not been provided we can stop there.
         if (statusCode != Status.NO_INTENT) {
@@ -693,6 +697,9 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
      * Parse the dynamic editing XML file to retrieve snapchanges
      */
     private void parseDynamicEditing() {
+        if (!dynamicEditingHolder.empty())
+            return;
+
         DynamicEditingParser parser = new DynamicEditingParser(dynamicEditingFN);
         try {
             parser.parse(dynamicEditingHolder);

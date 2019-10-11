@@ -58,6 +58,8 @@ import org.xmlpull.v1.XmlPullParserFactory;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.AdaptationSetSRD;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.DashManifestExtended;
 import fr.unice.i3s.uca4svr.toucan_vr.dashSRD.manifest.SupplementalProperty;
+import fr.unice.i3s.uca4svr.toucan_vr.dynamicEditing.DynamicEditingHolder;
+import fr.unice.i3s.uca4svr.toucan_vr.dynamicEditing.DynamicEditingParser;
 
 /**
  * A parser of media presentation description files.
@@ -129,6 +131,7 @@ public class DashSRDManifestParser extends DefaultHandler
         UtcTimingElement utcTiming = null;
         Uri location = null;
 
+        DynamicEditingHolder dynamicEditingHolder = new DynamicEditingHolder(false);
         List<Period> periods = new ArrayList<>();
         long nextPeriodStartMs = dynamic ? C.TIME_UNSET : 0;
         boolean seenEarlyAccessPeriod = false;
@@ -144,6 +147,9 @@ public class DashSRDManifestParser extends DefaultHandler
                 utcTiming = parseUtcTiming(xpp);
             } else if (XmlPullParserUtil.isStartTag(xpp, "Location")) {
                 location = Uri.parse(xpp.nextText());
+            } else if (XmlPullParserUtil.isStartTag(xpp, "snapchanges")) {
+                dynamicEditingHolder = new DynamicEditingHolder(true);
+                new DynamicEditingParser("").parse(dynamicEditingHolder, xpp);
             } else if (XmlPullParserUtil.isStartTag(xpp, "Period") && !seenEarlyAccessPeriod) {
                 Pair<Period, Long> periodWithDurationMs = parsePeriod(xpp, baseUrl, nextPeriodStartMs);
                 Period period = periodWithDurationMs.first;
@@ -179,16 +185,16 @@ public class DashSRDManifestParser extends DefaultHandler
 
         return buildMediaPresentationDescription(availabilityStartTime, durationMs, minBufferTimeMs,
                 dynamic, minUpdateTimeMs, timeShiftBufferDepthMs, suggestedPresentationDelayMs, utcTiming,
-                location, periods);
+                location, dynamicEditingHolder, periods);
     }
 
     protected DashManifest buildMediaPresentationDescription(long availabilityStartTime,
                                                              long durationMs, long minBufferTimeMs, boolean dynamic, long minUpdateTimeMs,
                                                              long timeShiftBufferDepthMs, long suggestedPresentationDelayMs, UtcTimingElement utcTiming,
-                                                             Uri location, List<Period> periods) {
+                                                             Uri location, DynamicEditingHolder dynamicEditingHolder, List<Period> periods) {
         return new DashManifestExtended(availabilityStartTime, durationMs, minBufferTimeMs,
                 dynamic, minUpdateTimeMs, timeShiftBufferDepthMs, suggestedPresentationDelayMs, utcTiming,
-                location, periods, null);
+                location, periods, dynamicEditingHolder);
     }
 
     protected UtcTimingElement parseUtcTiming(XmlPullParser xpp) {
