@@ -30,6 +30,7 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.FileAppender;
+import fr.unice.i3s.uca4svr.toucan_vr.PlayerActivity;
 
 /**
  * It tracks if the snapchange is executed or not (because the user was looking at the ROI when the snapchange occurred)
@@ -89,7 +90,7 @@ public class SnapchangeEventsTracker {
     private String createLogFileName(String logFilePrefix) {
         DateFormat dateFormat = new SimpleDateFormat("yyyy_MM_dd_HH_mm_ss", Locale.US);
         Date date = new Date();
-        return String.format("%s_snapchange_%s.csv", logFilePrefix, dateFormat.format(date));
+        return String.format("%s_snapchange_%s_ID#%s.csv", logFilePrefix, dateFormat.format(date), PlayerActivity.getUserID());
     }
 
     /**

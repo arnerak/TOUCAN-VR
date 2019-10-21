@@ -141,6 +141,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
 
     private Status statusCode = Status.NULL;
 
+    private static String IDnumber;
     private Intent intent;
     private boolean newIntent = false;
 
@@ -168,8 +169,12 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         final Minimal360Video main = new Minimal360Video(statusCode, tiles, gridWidth, gridHeight, dynamicEditingHolder);
         setMain(main, "gvr.xml");
 
-        // Download manifest to get SRD for parametrization
-        new DownloadManifestFromUri().execute(mediaUri);
+        boolean isRemoteFile = !Util.isLocalFileUri(Uri.parse(mediaUri));
+        if (isRemoteFile)
+            // Download manifest to get SRD for parametrization
+            new DownloadManifestFromUri().execute(mediaUri);
+        else
+            initialize();
     }
 
     // Rebuild everything if the intent has changed after launching a new video from the parametrizer.
@@ -190,8 +195,11 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
             final Minimal360Video main = new Minimal360Video(statusCode, tiles, gridWidth, gridHeight, dynamicEditingHolder);
             setMain(main, "gvr.xml");
 
-            // Download manifest to get SRD for parametrization
-            new DownloadManifestFromUri().execute(mediaUri);
+            boolean isRemoteFile = !Util.isLocalFileUri(Uri.parse(mediaUri));
+            if (isRemoteFile)
+                new DownloadManifestFromUri().execute(mediaUri);
+            else
+                initialize();
         }
     }
 
@@ -220,6 +228,9 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
             tiles = srdTiles.toArray(new String[0]);
             numberOfTiles = tiles.length / 4;
 
+            // Get snapchange info from manifest
+            dynamicEditingHolder = manifest.getDynamicEditingHolder();
+
             Log.v("M360", Arrays.toString(tiles));
             Log.v("M360", "" + numberOfTiles);
 
@@ -227,13 +238,15 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
             Log.e("M360", ex.getMessage());
         }
 
+        initialize();
+    }
+
+    private void initialize() {
+
         // Apply parameters attained from manifest
         final Minimal360Video main = (Minimal360Video) getMain();
         main.setSRDValues(gridWidth, gridHeight, tiles);
-        main.setDynamicEditingHolder(manifest.getDynamicEditingHolder());
-
-        // Get snapchange info from manifest
-        dynamicEditingHolder = manifest.getDynamicEditingHolder();
+        main.setDynamicEditingHolder(dynamicEditingHolder);
 
         // The intent is required to run the app, if it has not been provided we can stop there.
         if (statusCode != Status.NO_INTENT) {
@@ -291,6 +304,7 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
             dynamicEditingHolder = new DynamicEditingHolder(true);
         else
             dynamicEditingHolder = new DynamicEditingHolder(false);
+        IDnumber = intent.getStringExtra("userID");
     }
 
     /**
@@ -706,6 +720,11 @@ public class PlayerActivity extends GVRActivity implements RequestPermissionResu
         } catch (Exception e) {
             changeStatus(Status.WRONGDYNED);
         }
+    }
+
+    public static String getUserID()
+    {
+        return IDnumber;
     }
 
     class DownloadManifestFromUri extends AsyncTask<String, String, String> {
