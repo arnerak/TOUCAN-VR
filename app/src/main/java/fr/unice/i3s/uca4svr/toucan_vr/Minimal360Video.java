@@ -335,7 +335,7 @@ public class Minimal360Video extends GVRMain implements PushResponse {
 
     // add a 360-photo as background, taken from resources
     Future<GVRTexture> textureSphere  = gvrContext.loadFutureTexture(
-            new GVRAndroidResource(gvrContext, R.drawable.prague));
+            new GVRAndroidResource(gvrContext, R.drawable.texture));
     GVRSphereSceneObject sphereObject = new GVRSphereSceneObject(gvrContext, false, textureSphere);
     sphereObject.getTransform().setScale(100, 100, 100);
     scene.addSceneObject(sphereObject);
@@ -414,26 +414,19 @@ public class Minimal360Video extends GVRMain implements PushResponse {
 
         }
       }
-
-      if (realtimeEventPusher != null) {
-        long currentTime = clock.elapsedRealtime();
-        if (currentTime - lastTransmissionTime >= 80 || lastTransmissionTime == Long.MIN_VALUE) {
-          realtimeEventPusher = new PushRealtimeEvents(gvrContext, realtimeEventPusher.getServerIP(), this);
-          realtimeEvent = new RealtimeEvent();
-          realtimeEvent.timestamp = clock.elapsedRealtime();
-          realtimeEvent.videoTime = player.getCurrentPosition();
-          realtimeEvent.playing = player.getPlayWhenReady() && player.getPlaybackState() == ExoPlayer.STATE_READY;
-          GVRTransform headTransform = gvrContext.getMainScene().getMainCameraRig().getHeadTransform();
-          realtimeEvent.x = headTransform.getRotationX();
-          realtimeEvent.y = headTransform.getRotationY();
-          realtimeEvent.z = headTransform.getRotationZ();
-          realtimeEvent.w = headTransform.getRotationW();
-          realtimeEvent.dynamic = dynamicEditingHolder.isDynamicEdited();
-          realtimeEvent.snapAngle = currentSnapAngle;
-          realtimeEvent.start = lastTransmissionTime == Long.MIN_VALUE;
-          realtimeEventPusher.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, realtimeEvent);
-          lastTransmissionTime = currentTime;
-        }
+    }
+    if (realtimeEventPusher != null) {
+      long currentTime = clock.elapsedRealtime();
+      if (currentTime - lastTransmissionTime >= 32 || lastTransmissionTime == Long.MIN_VALUE) {
+        realtimeEventPusher = new PushRealtimeEvents(gvrContext, realtimeEventPusher.getServerIP(), this);
+        realtimeEvent = new RealtimeEvent();
+        GVRTransform headTransform = gvrContext.getMainScene().getMainCameraRig().getHeadTransform();
+        realtimeEvent.x = headTransform.getRotationX();
+        realtimeEvent.y = headTransform.getRotationY();
+        realtimeEvent.z = headTransform.getRotationZ();
+        realtimeEvent.w = headTransform.getRotationW();
+        realtimeEventPusher.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, realtimeEvent);
+        lastTransmissionTime = currentTime;
       }
     }
   }

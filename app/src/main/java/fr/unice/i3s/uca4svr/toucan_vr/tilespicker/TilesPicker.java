@@ -40,7 +40,6 @@ public class TilesPicker implements IPickEvents {
   }
 
   public synchronized boolean isPicked(int index) {
-
     if (pickedTiles != null && pickedTiles.length > index) {
       return pickedTiles[index];
     } else {
@@ -55,6 +54,7 @@ public class TilesPicker implements IPickEvents {
     for (int i = 0; i < pickedObjects.length; i++)
       pickedTiles[i] = pickedObjects[i] != null;
     //Logging
+    Log.v("M360", TextUtils.join(",", pickedTiles).replace("true","1").replace("false","0"));
     if(this.loggingActivated) {
       this.pickedTilesTracker.track((TextUtils.join(",", pickedTiles)).replace("true","1").replace("false","0"));
     }

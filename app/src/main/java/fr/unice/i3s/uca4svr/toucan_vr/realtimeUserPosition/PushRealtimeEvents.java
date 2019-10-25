@@ -24,8 +24,13 @@ import org.gearvrf.GVRTransform;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
 public class PushRealtimeEvents extends AsyncTask<RealtimeEvent, Integer, Boolean> {
@@ -56,48 +61,19 @@ public class PushRealtimeEvents extends AsyncTask<RealtimeEvent, Integer, Boolea
     }
 
     private Boolean push(RealtimeEvent event) {
-        GVRTransform headTransform = context.getMainScene().getMainCameraRig().getHeadTransform();
-        String urlParameters = "x=" + event.x +
-                "&y=" + event.y +
-                "&z=" + event.z +
-                "&w=" + event.w +
-                "&time=" + event.timestamp +
-                "&currentTime=" + event.videoTime +
-                "&playing=" + event.playing +
-                "&start=" + event.start +
-                "&snapAngle=" + event.snapAngle +
-                "&dynamic=" + event.dynamic;
-        String fullURI = serverIP + pushInfoPath;
-
-        if (fullURI.length() > 0) {
-            HttpURLConnection urlc;
-            try {
-                urlc = (HttpURLConnection) (new URL(fullURI).openConnection());
-            } catch (IOException e) {
-                return false;
-            }
-            try {
-                byte[] postData = urlParameters.getBytes(StandardCharsets.UTF_8);
-                urlc.setDoOutput(true);
-                urlc.setInstanceFollowRedirects(false);
-                urlc.setRequestMethod("POST");
-                urlc.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-                urlc.setRequestProperty("charset", "utf-8");
-                urlc.setRequestProperty("Content-Length", Integer.toString(postData.length));
-                urlc.setUseCaches(false);
-                try (DataOutputStream wr = new DataOutputStream(urlc.getOutputStream())) {
-                    wr.write(postData);
-                }
-                urlc.connect();
-                return (urlc.getResponseCode() == 200);
-            } catch (IOException e) {
-                return false;
-            } finally {
-                urlc.disconnect();
-            }
-        } else {
+        try {
+            DatagramSocket udpSocket = new DatagramSocket();
+            InetAddress serverAddr = InetAddress.getByName(serverIP.split(":")[0]);
+            int port = 9999;
+            if (serverIP.split(":").length == 2)
+                port = Integer.parseInt(serverIP.split(":")[1]);
+            byte[] buf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).putFloat(-event.z).putFloat(event.y).putFloat(event.x).putFloat(event.w).array();
+            DatagramPacket packet = new DatagramPacket(buf, buf.length, serverAddr, port);
+            udpSocket.send(packet);
+        } catch (Exception ex) {
             return false;
         }
+        return true;
     }
 
     public String getServerIP() {
